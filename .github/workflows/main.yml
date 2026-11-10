@@ -1,0 +1,39 @@
+name: Build Thai Step by Step Android APK
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Set up Flutter Stable
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+
+      - name: Install Dependencies & Run QA Verification
+        run: |
+          flutter pub get
+          flutter analyze
+
+      - name: Build Release APK (API 26-35)
+        run: |
+          flutter build apk --release
+
+      - name: Upload Installable APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Thai-Step-by-Step-v1.0-release-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
