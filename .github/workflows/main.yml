@@ -5,6 +5,9 @@ on:
     branches: [ main, master ]
   workflow_dispatch:
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   build-apk:
     runs-on: ubuntu-latest
@@ -23,8 +26,20 @@ jobs:
         with:
           channel: 'stable'
 
-      - name: Prepare Android Gradle Project & Assets
+      - name: Prepare Android Gradle Project & Fix AGP 9 / SDK 36 Compatibility
         run: |
+          # 1. 移除使用已廢除 jcenter() 的 speech_to_text 套件（解決截圖 4 的 jcenter 錯誤）
+          sed -i '/speech_to_text/d' pubspec.yaml
+
+          # 2. 移除多餘的未用 import（避免 flutter analyze 報錯）
+          if [ -f "lib/services/local_storage_service.dart" ]; then
+            sed -i "/dart:convert/d" lib/services/local_storage_service.dart
+          fi
+          if [ -f "lib/main.dart" ]; then
+            sed -i "/flutter\/services.dart/d" lib/main.dart
+          fi
+
+          # 3. 備份 Dart 原始碼與 pubspec，並透過 flutter create 產生完整 Android Gradle 專案
           cp pubspec.yaml pubspec.yaml.bak
           cp -r lib lib_bak
           rm -rf android test
@@ -32,15 +47,27 @@ jobs:
           rm -rf test
           mv pubspec.yaml.bak pubspec.yaml
           rm -rf lib && mv lib_bak lib
+
+          # 4. 加入官方 AGP 9+ 相容設定 android.newDsl=false（解決截圖 5 的 AGP 9 newDsl 錯誤）
+          touch android/gradle.properties
+          sed -i '/android.newDsl/d' android/gradle.properties
+          echo "" >> android/gradle.properties
+          echo "android.newDsl=false" >> android/gradle.properties
+
+          # 5. 確保資源目錄與預設 JSON 存在
           mkdir -p assets/curriculum assets/web
           if [ ! -f "assets/curriculum/thai_curriculum.json" ]; then
             echo '{"status":"embedded_in_html"}' > assets/curriculum/thai_curriculum.json
           fi
+
+          # 6. 設定 compileSdk = 36（解決截圖 4 的 SDK 36 警告）、minSdk = 26、targetSdk = 35
           if [ -f "android/app/build.gradle.kts" ]; then
+            sed -i 's/compileSdk = .*/compileSdk = 36/g' android/app/build.gradle.kts
             sed -i 's/minSdk = .*/minSdk = 26/g' android/app/build.gradle.kts
             sed -i 's/targetSdk = .*/targetSdk = 35/g' android/app/build.gradle.kts
-            sed -i 's/compileSdk = .*/compileSdk = 35/g' android/app/build.gradle.kts
           elif [ -f "android/app/build.gradle" ]; then
+            sed -i 's/compileSdkVersion .*/compileSdkVersion 36/g' android/app/build.gradle
+            sed -i 's/compileSdk .*/compileSdk 36/g' android/app/build.gradle
             sed -i 's/minSdkVersion .*/minSdkVersion 26/g' android/app/build.gradle
             sed -i 's/minSdk .*/minSdk 26/g' android/app/build.gradle
             sed -i 's/targetSdkVersion .*/targetSdkVersion 35/g' android/app/build.gradle
@@ -52,7 +79,7 @@ jobs:
           flutter pub get
           flutter analyze --no-fatal-infos --no-fatal-warnings
 
-      - name: Build Release APK (API 26-35)
+      - name: Build Release APK (compileSdk 36 / minSdk 26 / targetSdk 35)
         run: |
           flutter build apk --release
 
